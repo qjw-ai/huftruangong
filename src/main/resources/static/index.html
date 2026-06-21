@@ -19,6 +19,24 @@
         .prose pre { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; }
         .prose code { color: #ef4444; background: #f3f4f6; padding: 0.2rem 0.4rem; border-radius: 0.25rem; }
         .prose pre code { color: inherit; background: transparent; padding: 0; }
+
+        /* TTS 播放按钮动画 */
+        @keyframes tts-bounce {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+        }
+        .tts-playing {
+            animation: tts-bounce 0.4s ease-in-out infinite;
+        }
+
+        /* 录音脉冲动画 */
+        @keyframes mic-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+            50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+        }
+        .mic-recording {
+            animation: mic-pulse 1.2s ease-in-out infinite;
+        }
     </style>
 </head>
 <body class="bg-gray-50 h-screen flex flex-col">
@@ -145,9 +163,27 @@
                                 </div>
                             </div>
 
-                            <div v-if="msg.content"
-                                 class="bg-white border border-gray-100 p-4 rounded-2xl rounded-tl-none text-sm text-gray-800 shadow-sm prose max-w-none"
-                                 v-html="renderMarkdown(msg.content)">
+                            <div class="flex items-end gap-1">
+                                <div v-if="msg.content"
+                                     class="bg-white border border-gray-100 p-4 rounded-2xl rounded-tl-none text-sm text-gray-800 shadow-sm prose max-w-none flex-1"
+                                     v-html="renderMarkdown(msg.content)">
+                                </div>
+
+                                <!-- 🔊 TTS Play Button -->
+                                <button v-if="msg.content && !msg.isTyping"
+                                        @click="speakText(msg.content, index)"
+                                        :disabled="isSpeaking[index]"
+                                        :class="[
+                                            'flex-shrink-0 p-1.5 rounded-full transition-all duration-200',
+                                            isSpeaking[index]
+                                                ? 'bg-blue-100 text-blue-600 tts-playing'
+                                                : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'
+                                        ]"
+                                        :title="isSpeaking[index] ? '正在播放...' : '朗读此消息'">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                                    </svg>
+                                </button>
                             </div>
 
                             <div v-if="msg.isTyping && !msg.content" class="text-gray-400 text-xs ml-1 flex items-center gap-1">
@@ -161,24 +197,54 @@
 
             </div>
 
+            <!-- 输入区 -->
             <div class="p-4 border-t bg-white">
-                <div class="max-w-4xl mx-auto relative">
-                    <textarea v-model="input" @keydown.enter.prevent="sendMessage"
-                              placeholder="输入消息，Enter 发送..."
-                              rows="1"
-                              @input="autoResize"
-                              :disabled="isGenerating"
-                              class="w-full pl-4 pr-12 py-3 bg-gray-100 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none shadow-inner transition disabled:opacity-50 text-sm"></textarea>
-
-                    <button @click="sendMessage" :disabled="!input.trim() || isGenerating"
-                            class="absolute right-2 bottom-2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                <div class="max-w-4xl mx-auto relative flex items-end gap-2">
+                    <!-- 🎤 麦克风按钮 + 状态文字 -->
+                    <div class="flex items-center gap-1">
+                        <button v-if="supportsMic"
+                                @click="toggleRecording"
+                                :class="[
+                                    'flex-shrink-0 p-2.5 rounded-full transition-all duration-200',
+                                    isRecording
+                                        ? 'bg-red-500 text-white mic-recording'
+                                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                                ]"
+                                :disabled="isRecognizing"
+                                :title="isRecording ? '点击停止录音' : '语音输入'">
+                        <!-- 麦克风图标 -->
+                        <svg v-if="!isRecording" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                        </svg>
+                        <!-- 停止图标（录音中显示） -->
+                        <svg v-else xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" class="w-5 h-5">
+                            <rect x="6" y="6" width="12" height="12" rx="2" />
                         </svg>
                     </button>
+                        <!-- 识别状态文字 -->
+                        <span v-if="isRecognizing" class="text-xs text-blue-500 animate-pulse whitespace-nowrap">识别中...</span>
+                    </div>
+
+                    <div class="flex-1 relative">
+                        <textarea v-model="input" @keydown.enter.prevent="sendMessage"
+                                  placeholder="输入消息，Enter 发送..."
+                                  rows="1"
+                                  @input="autoResize"
+                                  :disabled="isGenerating || isRecording"
+                                  class="w-full pl-4 pr-12 py-3 bg-gray-100 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none shadow-inner transition disabled:opacity-50 text-sm"></textarea>
+
+                        <button @click="sendMessage" :disabled="!input.trim() || isGenerating"
+                                class="absolute right-2 bottom-2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                            </svg>
+                        </button>
+                    </div>
                 </div>
-                <div class="text-center text-xs text-gray-400 mt-2">
-                    Internal System Beta v0.1 | Powered by Spring AI & Qwen
+
+                <div class="text-center text-xs text-gray-400 mt-2 flex items-center justify-center gap-2">
+                    <span>Internal System Beta v0.1 | Powered by Spring AI & Qwen</span>
+                    <span v-if="!supportsMic" class="text-gray-300">| 语音输入不可用</span>
                 </div>
             </div>
         </div>
@@ -186,7 +252,7 @@
 </div>
 
 <script>
-    const { createApp, ref, onMounted, nextTick } = Vue;
+    const { createApp, ref, onMounted, nextTick, onUnmounted } = Vue;
 
     createApp({
         setup() {
@@ -208,6 +274,158 @@
             const isGenerating = ref(false);
             const isConnected = ref(true); // 简单模拟
             const chatContainer = ref(null);
+
+            // --- TTS 状态 ---
+            const isSpeaking = ref({}); // message index -> boolean
+
+            // --- 语音输入状态 ---
+            const isRecording = ref(false);
+            const isRecognizing = ref(false);  // ASR 识别中
+            const supportsMic = ref(false);
+            let mediaRecorder = null;
+            let audioChunks = [];
+            let recordingTimeout = null;
+
+            // --- TTS: 朗读 AI 消息 ---
+            const speakText = async (text, index) => {
+                if (isSpeaking.value[index]) return;
+                isSpeaking.value[index] = true;
+                try {
+                    const res = await fetch('/api/speech/synthesize', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token.value}`
+                        },
+                        body: JSON.stringify({ text: text.substring(0, 200) })
+                    });
+                    if (!res.ok) {
+                        if (res.status === 401) { logout(); return; }
+                        throw new Error('TTS request failed: ' + res.statusText);
+                    }
+                    const blob = await res.blob();
+                    const audio = new Audio(URL.createObjectURL(blob));
+                    audio.onended = () => { isSpeaking.value[index] = false; };
+                    audio.onerror = () => { isSpeaking.value[index] = false; };
+                    await audio.play();
+                } catch (e) {
+                    console.warn('TTS error', e);
+                    isSpeaking.value[index] = false;
+                }
+            };
+
+            // --- 语音输入: 检查浏览器支持 ---
+            const checkMicSupport = () => {
+                supportsMic.value = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+            };
+
+            // --- 语音输入：开始录音 ---
+            const startRecording = async () => {
+                if (!supportsMic.value) return;
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    let mimeType = 'audio/webm';
+                    if (!MediaRecorder.isTypeSupported(mimeType)) {
+                        mimeType = 'audio/mp4';
+                        if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = '';
+                    }
+                    const options = mimeType ? { mimeType } : {};
+                    mediaRecorder = new MediaRecorder(stream, options);
+                    audioChunks = [];
+                    // 在 stop 前缓存 mimeType，因为 stop 后可能为 undefined
+                    const capturedMimeType = mediaRecorder.mimeType || 'audio/webm';
+
+                    mediaRecorder.ondataavailable = (e) => {
+                        if (e.data && e.data.size > 0) audioChunks.push(e.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        stream.getTracks().forEach(t => t.stop());
+                        const chunkCount = audioChunks.length;
+                        console.log('Audio recorded: ' + chunkCount + ' chunks');
+
+                        if (chunkCount === 0) {
+                            console.warn('无录音数据，请长按至少1秒');
+                            isRecording.value = false;
+                            return;
+                        }
+
+                        const blob = new Blob(audioChunks, { type: capturedMimeType });
+                        const ext = capturedMimeType.includes('mp4') ? 'm4a' : 'webm';
+                        const formData = new FormData();
+                        formData.append('file', blob, 'recording.' + ext);
+
+                        console.log('Sending ASR: ' + blob.size + ' bytes, type: ' + capturedMimeType);
+                        isRecognizing.value = true;
+                        try {
+                            const res = await fetch('/api/speech/recognize', {
+                                method: 'POST',
+                                headers: { 'Authorization': 'Bearer ' + token.value },
+                                body: formData
+                            });
+                            if (res.status === 401) {
+                                console.warn('Token 已过期，请重新登录');
+                                logout();
+                                return;
+                            }
+                            if (!res.ok) throw new Error('ASR failed: ' + res.status);
+                            const data = await res.json();
+                            console.log('ASR result: ' + JSON.stringify(data));
+                            if (data.text) {
+                                input.value = (input.value ? input.value + data.text : data.text);
+                            }
+                        } catch (e) {
+                            console.warn('ASR error: ' + e.message);
+                        } finally {
+                            isRecognizing.value = false;
+                        }
+                        isRecording.value = false;
+                    };
+
+                    mediaRecorder.onerror = () => {
+                        console.warn('MediaRecorder error');
+                        stream.getTracks().forEach(t => t.stop());
+                        isRecording.value = false;
+                    };
+
+                    // 必须设 timeslice(1000ms) 才能持续收集数据
+                    mediaRecorder.start(1000);
+                    isRecording.value = true;
+                    console.log('Recording started');
+
+                    recordingTimeout = setTimeout(() => {
+                        if (isRecording.value) { stopRecording(); console.log('Auto-stopped after 10s'); }
+                    }, 10000);
+
+                } catch (e) {
+                    console.warn('麦克风权限被拒绝或不可用');
+                    isRecording.value = false;
+                }
+            };
+
+            // --- 语音输入: 停止录音 ---
+            const stopRecording = () => {
+                if (recordingTimeout) {
+                    clearTimeout(recordingTimeout);
+                    recordingTimeout = null;
+                }
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    mediaRecorder.stop();
+                    // onstop 回调会设置 isRecording = false
+                } else {
+                    // 录音机已非活跃状态，直接重置 UI
+                    isRecording.value = false;
+                }
+            };
+
+            // --- 语音输入: 切换录音状态 ---
+            const toggleRecording = () => {
+                if (isRecording.value) {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            };
 
             // --- 核心逻辑：登录 ---
             const refreshCaptcha = async () => {
@@ -258,6 +476,10 @@
                 localStorage.removeItem('userId');
                 isLoggedIn.value = false;
                 messages.value = [];
+                // 停止正在进行的录音
+                if (isRecording.value) stopRecording();
+                // 停止所有正在播放的 TTS
+                isSpeaking.value = {};
                 refreshCaptcha();
             };
 
@@ -407,6 +629,7 @@
 
             // --- 生命周期 ---
             onMounted(() => {
+                checkMicSupport();
                 if (token.value) {
                     isLoggedIn.value = true;
                 } else {
@@ -414,10 +637,20 @@
                 }
             });
 
+            onUnmounted(() => {
+                // 清理录音资源
+                if (recordingTimeout) clearTimeout(recordingTimeout);
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    mediaRecorder.stop();
+                }
+            });
+
             return {
                 isLoggedIn, loginForm, captchaBlobUrl, errorMsg, isLoading, userId,
                 currentMode, messages, input, isGenerating, isConnected, chatContainer,
-                refreshCaptcha, handleLogin, logout, switchMode, sendMessage, autoResize, renderMarkdown
+                isSpeaking, isRecording, isRecognizing, supportsMic,
+                refreshCaptcha, handleLogin, logout, switchMode, sendMessage, autoResize, renderMarkdown,
+                speakText, toggleRecording, startRecording, stopRecording
             };
         }
     }).mount('#app');
