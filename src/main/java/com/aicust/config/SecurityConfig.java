@@ -1,6 +1,7 @@
 package com.aicust.config;
 
 import com.aicust.security.JwtAuthenticationFilter;
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -28,6 +29,8 @@ public class SecurityConfig {
 
                 // 3. 拦截规则
                 .authorizeHttpRequests(auth -> auth
+                        // SSE 异步 dispatch 已经在初始请求完成鉴权，二次 dispatch 放行避免响应已提交后误判 403
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers(
                                 "/", "/index.html", "/favicon.ico",
                                 "/static/**", "/css/**", "/js/**", "/images/**",
