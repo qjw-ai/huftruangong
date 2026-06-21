@@ -44,6 +44,9 @@ public class SecurityConfig {
                         // 聊天接口显式声明，确保 SSE 异步dispatch 不丢认证
                         .requestMatchers("/api/chat", "/api/agent").authenticated()
 
+                        // 管理后台接口
+                        .requestMatchers("/api/admin/**").authenticated()
+
                         .anyRequest().authenticated()
                 )
 
