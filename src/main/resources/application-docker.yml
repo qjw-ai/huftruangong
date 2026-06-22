@@ -24,3 +24,13 @@ rag:
   base-url: ${RAG_BASE_URL:http://localhost:8081}
   username: ${RAG_USERNAME:admin}
   password: ${RAG_PASSWORD:}
+
+# ============================================================
+# 语音服务配置
+# ============================================================
+speech:
+  tts:
+    default-voice: zh-CN-XiaoxiaoNeural
+    default-rate: "+0%"
+  asr:
+    whisper-model: models/ggml-small.bin

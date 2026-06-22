@@ -36,13 +36,17 @@ services:
 
   # ========== AI-Cust 应用 ==========
   ai-cust:
-    build: .
+    build:
+      context: .
+      args:
+        - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
     container_name: cust-app
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8080}:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # 模型已打在镜像里，无需 volume
     environment:
       - SPRING_PROFILES_ACTIVE=docker
       - OLLAMA_HOST=${OLLAMA_HOST:-host.docker.internal}

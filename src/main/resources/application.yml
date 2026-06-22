@@ -23,3 +23,13 @@ spring:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/ai_cust?useSSL=false&serverTimezone=UTC
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:}
+
+# ============================================================
+# 语音服务配置
+# ============================================================
+speech:
+  tts:
+    default-voice: zh-CN-XiaoxiaoNeural
+    default-rate: "+0%"
+  asr:
+    whisper-model: models/ggml-small.bin
