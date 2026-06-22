@@ -95,7 +95,7 @@ public class AuthController {
             throw new RuntimeException("密码错误");
         }
 
-        String token = jwtUtil.generateToken(user.getId(), user.getUsername());
+        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole());
         return Map.of("token", token, "userId", user.getId());
     }
 

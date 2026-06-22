@@ -30,10 +30,14 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/", "/index.html", "/favicon.ico",
+                                "/admin.html",
                                 "/static/**", "/css/**", "/js/**", "/images/**",
                                 "/api/auth/**",
+                                "/api/digital-human/active",
                                 "/error"
                         ).permitAll()
+
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
                         .requestMatchers(
                                 "/tool/**",

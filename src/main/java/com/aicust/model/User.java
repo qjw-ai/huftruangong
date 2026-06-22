@@ -13,4 +13,6 @@ public class User {
     private String username;
     private String password;
     private Integer balance;
+    @Column(nullable = false, columnDefinition = "VARCHAR(20) DEFAULT 'USER'")
+    private String role = "USER";
 }

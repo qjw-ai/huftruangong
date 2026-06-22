@@ -43,13 +43,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (jwtUtil.validateToken(token)) {
 
                 Long userId = jwtUtil.getUserId(token);
+                String role = jwtUtil.getRole(token);
+                if (role == null || role.isBlank()) {
+                    role = "USER";
+                }
 
-                // 给一个默认权限 USER
+                // 从 token 中解析 role，设置 Spring Security 权限（ROLE_ 前缀是 hasRole() 的约定）
                 UsernamePasswordAuthenticationToken auth =
                         new UsernamePasswordAuthenticationToken(
                                 userId,
                                 null,
-                                List.of(new SimpleGrantedAuthority("USER"))
+                                List.of(new SimpleGrantedAuthority("ROLE_" + role))
                         );
 
                 SecurityContextHolder.getContext().setAuthentication(auth);

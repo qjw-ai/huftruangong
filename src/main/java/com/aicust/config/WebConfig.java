@@ -21,6 +21,7 @@ public class WebConfig implements WebMvcConfigurer {
                 // 👇✅ 关键修复：排除 auth 相关接口，防止死循环
                 .excludePathPatterns(
                         "/api/auth/**",      // 排除登录、验证码
+                        "/api/digital-human/active", // 排除公开数字人配置接口
                         "/api/auth/captcha", // 显式写出来（双重保险）
                         "/error",            // 排除错误页
                         "/static/**"         // 排除静态资源
