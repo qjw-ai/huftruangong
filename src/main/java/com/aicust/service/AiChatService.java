@@ -1,6 +1,7 @@
 package com.aicust.service;
 
 import com.aicust.model.AiPlan;
+import com.aicust.service.SentimentAnalysisService.AnalysisResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -8,12 +9,15 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class AiChatService {
@@ -27,13 +31,16 @@ public class AiChatService {
     private final SensitiveWordService sensitiveService;
     private final ChatMemoryService memoryService;
     private final RagSearchService ragSearchService;
+    private final InteractionLogWriter logWriter;
+    private final SentimentAnalysisService sentimentService;
 
     /** RAG 检索默认 topK */
     private static final int RAG_TOPK = 5;
 
     public AiChatService(ChatClient chatClient, TokenEstimator estimator, TokenQuotaService quotaService,
                          PlanService planService, SensitiveWordService sensitiveService,
-                         ChatMemoryService memoryService, RagSearchService ragSearchService) {
+                         ChatMemoryService memoryService, RagSearchService ragSearchService,
+                         InteractionLogWriter logWriter, SentimentAnalysisService sentimentService) {
         this.chatClient = chatClient;
         this.estimator = estimator;
         this.quotaService = quotaService;
@@ -41,6 +48,8 @@ public class AiChatService {
         this.sensitiveService = sensitiveService;
         this.memoryService = memoryService;
         this.ragSearchService = ragSearchService;
+        this.logWriter = logWriter;
+        this.sentimentService = sentimentService;
     }
 
     /**
@@ -54,6 +63,19 @@ public class AiChatService {
 
         if (sensitiveService.hasSensitiveWord(prompt)) {
             return Flux.just("Your prompt contains sensitive content. Request denied.");
+        }
+
+        long startTime = System.currentTimeMillis();
+        AtomicReference<String> usernameRef = new AtomicReference<>("");
+        AtomicReference<String> fullAnswerRef = new AtomicReference<>("");
+
+        // 尝试获取用户名
+        try {
+            var auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getDetails() instanceof com.aicust.model.User user) {
+                usernameRef.set(user.getUsername());
+            }
+        } catch (Exception ignored) {
         }
 
         // ===== RAG 检索 =====
@@ -74,7 +96,6 @@ public class AiChatService {
         memoryService.addMessage(userId, new UserMessage(prompt));
 
         AtomicInteger actualLength = new AtomicInteger(0);
-        StringBuilder fullResponse = new StringBuilder();
 
         return chatClient.prompt()
                 .messages(messages)
@@ -83,15 +104,52 @@ public class AiChatService {
                 .doOnNext(chunk -> {
                     if (chunk != null) {
                         actualLength.addAndGet(chunk.length());
-                        fullResponse.append(chunk);
+                        fullAnswerRef.set(fullAnswerRef.get() + chunk);
                     }
                 })
                 .doOnComplete(() -> {
                     int actual = actualLength.get();
+                    long duration = System.currentTimeMillis() - startTime;
+                    String answer = fullAnswerRef.get();
+
                     quotaService.settle(userId, estimated, actual);
-                    memoryService.addMessage(userId, new AssistantMessage(fullResponse.toString()));
+                    memoryService.addMessage(userId, new AssistantMessage(answer));
+
+                    // 异步写入交互日志 + 情感分析
+                    saveInteractionLog(userId, usernameRef.get(), prompt, answer, mode,
+                            estimated, actual, duration);
                 })
-                .doOnError(e -> quotaService.rollback(userId, estimated));
+                .doOnError(e -> {
+                    quotaService.rollback(userId, estimated);
+                    log.error("Chat error for userId={}: {}", userId, e.getMessage());
+                });
+    }
+
+    /**
+     * 异步保存交互日志并进行情感分析。
+     */
+    private void saveInteractionLog(Long userId, String username, String question,
+                                    String answer, String mode,
+                                    int estimatedTokens, int actualTokens,
+                                    long durationMs) {
+        try {
+            // 情感分析
+            AnalysisResult sentiment = sentimentService.analyze(answer);
+
+            // 关注点聚类
+            Map<String, Long> focusPoints = sentimentService.extractFocusPoints(question, answer);
+            String focusStr = focusPoints.keySet().stream()
+                    .limit(10)
+                    .reduce((a, b) -> a + "," + b)
+                    .orElse("");
+
+            logWriter.logInteraction(userId, username, question, answer, mode,
+                    estimatedTokens, actualTokens, durationMs,
+                    sentiment.score(), sentiment.label(), focusStr);
+
+        } catch (Exception e) {
+            log.error("Failed to save interaction log for userId={}: {}", userId, e.getMessage());
+        }
     }
 
     // ==================== 私有方法 ====================

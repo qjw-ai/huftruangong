@@ -17,6 +17,7 @@ import reactor.core.publisher.Flux;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -31,6 +32,8 @@ public class AgentLoopService {
     private final TokenQuotaService quotaService; // 计费/限流服务
     private final ToolService toolService;        // 工具执行服务
     private final ObjectMapper objectMapper;      // 用于解析 JSON
+    private final InteractionLogWriter logWriter;
+    private final SentimentAnalysisService sentimentService;
 
     public AgentLoopService(ChatClient chatClient,
                             AgentTaskRepository taskRepository,
@@ -38,7 +41,9 @@ public class AgentLoopService {
                             ChatMemoryService memoryService,
                             TokenQuotaService quotaService,
                             ToolService toolService,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            InteractionLogWriter logWriter,
+                            SentimentAnalysisService sentimentService) {
         this.chatClient = chatClient;
         this.taskRepository = taskRepository;
         this.stepRepository = stepRepository;
@@ -46,6 +51,8 @@ public class AgentLoopService {
         this.quotaService = quotaService;
         this.toolService = toolService;
         this.objectMapper = objectMapper;
+        this.logWriter = logWriter;
+        this.sentimentService = sentimentService;
     }
 
     /**
@@ -53,6 +60,7 @@ public class AgentLoopService {
      */
     public Flux<String> runAgent(Long userId, String prompt) {
         return Flux.create(sink -> {
+            long startTime = System.currentTimeMillis();
             String taskId = UUID.randomUUID().toString();
 
             // 1. 初始化任务并持久化 (MySQL)
@@ -149,6 +157,10 @@ public class AgentLoopService {
                         memoryService.addMessage(userId, new UserMessage(prompt)); // 存问题
                         memoryService.addMessage(userId, new AssistantMessage(content)); // 存答案
 
+                        // 4. 异步写入交互日志
+                        saveInteractionLog(userId, prompt, content,
+                                System.currentTimeMillis() - startTime);
+
                         isDone = true;
                     }
                 }
@@ -171,6 +183,26 @@ public class AgentLoopService {
                 sink.complete();
             }
         });
+    }
+
+    /**
+     * 异步保存 Agent 对话日志。
+     */
+    private void saveInteractionLog(Long userId, String question, String answer, long durationMs) {
+        try {
+            SentimentAnalysisService.AnalysisResult sentiment = sentimentService.analyze(answer);
+            Map<String, Long> focusPoints = sentimentService.extractFocusPoints(question, answer);
+            String focusStr = focusPoints.keySet().stream()
+                    .limit(10)
+                    .reduce((a, b) -> a + "," + b)
+                    .orElse("");
+
+            logWriter.logInteraction(userId, null, question, answer, "agent",
+                    null, answer != null ? answer.length() : 0, durationMs,
+                    sentiment.score(), sentiment.label(), focusStr);
+        } catch (Exception e) {
+            log.warn("Failed to save agent interaction log for userId={}: {}", userId, e.getMessage());
+        }
     }
 
     /**
